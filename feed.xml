@@ -1,0 +1,2171 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+
+
+<feed xmlns="http://www.w3.org/2005/Atom" >
+  <generator uri="https://jekyllrb.com/" version="3.8.4">Jekyll</generator>
+  <link href="https://wildfly.org//feed.xml" rel="self" type="application/atom+xml" />
+  <link href="https://wildfly.org//" rel="alternate" type="text/html" />
+  <updated>2021-02-08T16:56:22+00:00</updated>
+  <id>https://wildfly.org/</id>
+
+  
+  
+    <title type="html">WildFly</title>
+  
+
+  
+    <entry>
+      <title type="html">WildFly Bootable JAR cluster application with JKube openshift-maven-plugin</title>
+      <link href="https://wildfly.org//news/2021/02/01/Bootable-jar-jkube-clustering-openshift/" rel="alternate" type="text/html" title="WildFly Bootable JAR cluster application with JKube openshift-maven-plugin" />
+      <published>2021-02-01T00:00:00+00:00</published>
+      <updated>2021-02-01T00:00:00+00:00</updated>
+      <id>https://wildfly.org//news/2021/02/01/Bootable-jar-jkube-clustering-openshift</id>
+      
+      
+        <content type="html" xml:base="https://wildfly.org//news/2021/02/01/Bootable-jar-jkube-clustering-openshift/">&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;introduction&quot;&gt;Introduction&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;This post is a step-by-step guide describing how you can build and deploy on OpenShift an example of a WildFly Bootable JAR application that caches the HTTP session state. We will explore how Bootable JAR uses the &lt;a href=&quot;http://www.jgroups.org/manual5/index.html#_kube_ping&quot;&gt;KUBE_PING&lt;/a&gt; protocol for clustering discovery mechanisms and how you can use &lt;a href=&quot;https://www.eclipse.org/jkube/docs/openshift-maven-plugin&quot;&gt;JKube openshift-maven-plugin&lt;/a&gt; to deploy the application on OpenShift.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;getting-started&quot;&gt;Getting started&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The &lt;a href=&quot;https://github.com/yersan/wildfly-clustering-demo.git&quot;&gt;demo application&lt;/a&gt; is a minimalistic shopping cart that stores items in the HTTP session. The key points are:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;olist arabic&quot;&gt;
+&lt;ol class=&quot;arabic&quot;&gt;
+&lt;li&gt;
+&lt;p&gt;We want our session data to be replicated across all cluster members. The Jakarta Servlet specification supports distributable web applications. If you want to share your session data, you need to specify your session is distributable on the
+&lt;em&gt;web.xml&lt;/em&gt; file:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;&amp;lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&amp;gt;
+&amp;lt;web-app xmlns=&quot;http://xmlns.jcp.org/xml/ns/javaee&quot;
+         xmlns:xsi=&quot;http://www.w3.org/2001/XMLSchema-instance&quot;
+         xsi:schemaLocation=&quot;http://xmlns.jcp.org/xml/ns/javaee http://xmlns.jcp.org/xml/ns/javaee/web-app_4_0.xsd&quot;
+         version=&quot;4.0&quot;&amp;gt;
+    &amp;lt;distributable /&amp;gt;
+&amp;lt;/web-app&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Our bootable JAR application is built by using &lt;a href=&quot;https://docs.wildfly.org/22/Bootable_Guide.html#wildfly_bootable_JAR_development&quot;&gt;wildfly-jar-maven-plugin&lt;/a&gt;. This is the default configuration in our &lt;em&gt;pom.xml&lt;/em&gt;:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;&amp;lt;plugin&amp;gt;
+    &amp;lt;groupId&amp;gt;org.wildfly.plugins&amp;lt;/groupId&amp;gt;
+    &amp;lt;artifactId&amp;gt;wildfly-jar-maven-plugin&amp;lt;/artifactId&amp;gt;
+    &amp;lt;configuration&amp;gt;
+        &amp;lt;feature-pack-location&amp;gt;wildfly@maven(org.jboss.universe:community-universe)#22.0.0.Final&amp;lt;/feature-pack-location&amp;gt;
+        &amp;lt;layers&amp;gt;
+            &amp;lt;layer&amp;gt;jaxrs-server&amp;lt;/layer&amp;gt;
+            &amp;lt;layer&amp;gt;web-clustering&amp;lt;/layer&amp;gt;
+        &amp;lt;/layers&amp;gt;
+    &amp;lt;/configuration&amp;gt;
+    &amp;lt;executions&amp;gt;
+        &amp;lt;execution&amp;gt;
+            &amp;lt;goals&amp;gt;
+                &amp;lt;goal&amp;gt;package&amp;lt;/goal&amp;gt;
+            &amp;lt;/goals&amp;gt;
+        &amp;lt;/execution&amp;gt;
+    &amp;lt;/executions&amp;gt;
+&amp;lt;/plugin&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The &lt;strong&gt;feature-pack-location&lt;/strong&gt; is an expression used to resolve feature-pack artifacts from the remote repository. The feature-packs determine the WildFly version in use. Using a feature pack location has some advantages when you are interested in an automatic version resolution.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;admonitionblock note&quot;&gt;
+&lt;table&gt;
+&lt;tr&gt;
+&lt;td class=&quot;icon&quot;&gt;
+&lt;div class=&quot;title&quot;&gt;Note&lt;/div&gt;
+&lt;/td&gt;
+&lt;td class=&quot;content&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;If you are more comfortable by using maven GAVs, the above &lt;strong&gt;feature-pack-location&lt;/strong&gt; can be replaced by the equivalent feature pack:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;&amp;lt;feature-packs&amp;gt;
+    &amp;lt;feature-pack&amp;gt;
+        &amp;lt;groupId&amp;gt;org.wildfly&amp;lt;/groupId&amp;gt;
+        &amp;lt;artifactId&amp;gt;wildfly-galleon-pack&amp;lt;/artifactId&amp;gt;
+        &amp;lt;version&amp;gt;22.0.0.Final&amp;lt;/version&amp;gt;
+    &amp;lt;/feature-pack&amp;gt;
+&amp;lt;/feature-packs&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/table&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;The layers section specify the &lt;a href=&quot;https://docs.wildfly.org/22/Bootable_Guide.html#wildfly_layers&quot;&gt;Galleon layers&lt;/a&gt; we want for our application:&lt;/p&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;jaxrs-server: It adds support for JAX-RS, CDI and JPA. The application stores the items in the session by using a JAX-RS resource.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;web-clustering: Support for distributable web applications. This layer will supply the Infinispan web container cache and the JGroups subsystem.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;The default maven profile the application uses is to build and deploy the application locally. When we are going to deploy on Openshift, we will activate the &lt;a href=&quot;https://github.com/yersan/wildfly-clustering-demo/blob/master/pom.xml#L55&quot;&gt;openshift maven profile&lt;/a&gt; which adds on top of the default maven configuration the required configuration for running the application in OpenShift.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;In the aim to get a better understanding, firstly, we will build and verify the application locally. Then we will deploy and verify on OpenShift.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;building-and-testing-the-application-locally&quot;&gt;Building and testing the application locally&lt;/h3&gt;
+&lt;div class=&quot;olist arabic&quot;&gt;
+&lt;ol class=&quot;arabic&quot;&gt;
+&lt;li&gt;
+&lt;p&gt;Clone the application and build it:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ git clone https://github.com/yersan/wildfly-clustering-demo.git
+$ cd wildfly-clustering-demo
+wildfly-clustering-demo$ mvn package&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Now you can launch two server instances to verify the cluster works as expected. If you are running a Bootable JAR cluster application locally, you have to specify the node name for each server instance and deal with the port numbers to avoid port conflicts between the launched instances.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Launch the first application. In a terminal window execute the following:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;wildfly-clustering-demo$ java -jar ./target/wildfly-clustering-demo-bootable.jar -Djboss.node.name=node1&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Launch the second application in a different terminal taking care of the port conflicts:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;wildfly-clustering-demo$ java -jar ./target/wildfly-clustering-demo-bootable.jar -Djboss.node.name=node2 -Djboss.socket.binding.port-offset=10&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;You should see in the logs that a cluster has been formed, and the name of the nodes that have been joined to it:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;16:15:06,908 INFO  [org.infinispan.CLUSTER] (ServerService Thread Pool -- 44) ISPN000094: Received new cluster view for channel ejb: [node1|1] (2) [node1, node2]&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;admonitionblock note&quot;&gt;
+&lt;table&gt;
+&lt;tr&gt;
+&lt;td class=&quot;icon&quot;&gt;
+&lt;div class=&quot;title&quot;&gt;Note&lt;/div&gt;
+&lt;/td&gt;
+&lt;td class=&quot;content&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;When you have built the Bootable JAR application locally, without any further configuration, by default the JGroups subsystem is configured to use the UDP protocol and send messages to discover other cluster members to the 230.0.0.4 multicast address. If you do not see the above log trace, verify that your Operating System is capable of sending and receiving multicast datagrams and can route them to the 230.0.0.4 IP through your ethernet interface.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/table&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We are now ready to add some items to our HTTP session. We do not have a load balancer locally, so we will add items by using the first instance. Later, we will stop that instance and verify the session is replicated correctly.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Add some items to the application cart:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ curl --cookie-jar /tmp/session.txt -XPOST http://localhost:8080/api/jeans/2
+$ curl --cookie /tmp/session.txt -XPOST http://localhost:8080/api/shorts/4&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Check the cart items accessing to the first instance:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ curl --cookie /tmp/session.txt -XGET http://localhost:8080/api/cart
+{&quot;host&quot;:&quot;localhost&quot;,&quot;sessionId&quot;:&quot;vcVIqIU80USV7W11Qoh3QyJU1PPEFFxOPwI-HcEZ&quot;,&quot;cart&quot;:[{&quot;item&quot;:&quot;shorts&quot;,&quot;quantity&quot;:4},{&quot;item&quot;:&quot;jeans&quot;,&quot;quantity&quot;:2}]}&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Stop the first instance and check the cart again by accessing to the second node; notice the port is now 8090:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ curl --cookie /tmp/session.txt -XGET http://localhost:8090/api/cart
+{&quot;host&quot;:&quot;localhost&quot;,&quot;sessionId&quot;:&quot;vcVIqIU80USV7W11Qoh3QyJU1PPEFFxOPwI-HcEZ&quot;,&quot;cart&quot;:[{&quot;item&quot;:&quot;shorts&quot;,&quot;quantity&quot;:4},{&quot;item&quot;:&quot;jeans&quot;,&quot;quantity&quot;:2}]}&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We see the same session id and items on the second node. The session data is correctly replicated. Our cluster and application is working locally.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;moving-to-openshift&quot;&gt;Moving to OpenShift&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The demo application uses a specific maven profile to configure the particularities to build and deploy on OpenShift.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;adapting-the-wildfly-jar-maven-plugin-for-the-cloud-executions&quot;&gt;Adapting the &lt;em&gt;wildfly-jar-maven-plugin&lt;/em&gt; for the cloud executions&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The &lt;em&gt;wildfly-jar-maven-plugin&lt;/em&gt; has to know that we intend to build the WildFly Bootable JAR application for cloud execution. In the &lt;em&gt;openshift&lt;/em&gt; maven profile, we extend the default configuration adding the cloud configuration item as follows:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;&amp;lt;plugin&amp;gt;
+    &amp;lt;groupId&amp;gt;org.wildfly.plugins&amp;lt;/groupId&amp;gt;
+    &amp;lt;artifactId&amp;gt;wildfly-jar-maven-plugin&amp;lt;/artifactId&amp;gt;
+    &amp;lt;configuration&amp;gt;
+        &amp;lt;cloud/&amp;gt;
+    &amp;lt;/configuration&amp;gt;
+&amp;lt;/plugin&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;This setting adds specific server configuration to run the Bootable JAR in the cloud context, for example, the JGroups subsystem is now configured to use the KUBE_PING protocol for both tcp (default stack) and udp, the &lt;em&gt;microprofile-health&lt;/em&gt; Galleon layer is automatically provisioned, the &lt;em&gt;jboss.node.name&lt;/em&gt; is set automatically to the pod hostname. You can check &lt;a href=&quot;https://docs.wildfly.org/bootablejar/#wildfly_jar_configuring_cloud&quot;&gt;Configuring the server for cloud execution&lt;/a&gt; section in the Bootable JAR documentation to get more details about this setting.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;With the KUBE_PING protocol enabled, cluster member discovery is done by asking Kubernetes for a list of IP addresses of running pods. In order to make it work we need the following:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;Our pods have to have the &lt;strong&gt;KUBERNETES_NAMESPACE&lt;/strong&gt; environment variable set. This environment variable is used to define the namespace JGroups will use to discover other cluster members from this pod. The JKube OpenShift maven plugin sets this environment for us.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;We need to grant authorization to the service account the pod is running under so that it can access the Kubernetes REST API to get the list of addresses of all cluster nodes. We need to manually complete this step before deploying the Bootable JAR application.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;using-openshift-maven-plugin-to-deploy-on-openshift&quot;&gt;Using &lt;em&gt;openshift-maven-plugin&lt;/em&gt; to deploy on OpenShift&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;To deploy the application on OpenShift we will use &lt;a href=&quot;https://www.eclipse.org/jkube/docs/openshift-maven-plugin&quot;&gt;openshift-maven-plugin&lt;/a&gt;. This maven plugin is integrated with the Bootable JAR. It allows us to use some defaults for starting up applications keeping a simple and tidy configuration. It also adds automatically the readiness and liveness probes to the Bootable JAR application. These probes are just simple HTTP gets for following endpoints:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;Readiness: &lt;a href=&quot;http://localhost:9990/health/ready&quot; class=&quot;bare&quot;&gt;http://localhost:9990/health/ready&lt;/a&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Liveness: &lt;a href=&quot;http://localhost:9990/health/live&quot; class=&quot;bare&quot;&gt;http://localhost:9990/health/live&lt;/a&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;If you add readiness / liveness checks on your application code, those checks will be taken into account when you are deploying with the JKube plugin, since those checks will be available on the built-in microprofile-health capabilities added by the Bootable JAR maven plugin as an additional Galleon layer. Let us take a look at the JKube plugin configuration:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;&amp;lt;profiles&amp;gt;
+    &amp;lt;profile&amp;gt;
+        &amp;lt;id&amp;gt;openshift&amp;lt;/id&amp;gt;
+        &amp;lt;properties&amp;gt;
+            &amp;lt;jkube.generator.from&amp;gt;registry.redhat.io/ubi8/openjdk-11:latest&amp;lt;/jkube.generator.from&amp;gt;
+        &amp;lt;/properties&amp;gt;
+        &amp;lt;build&amp;gt;
+            &amp;lt;plugins&amp;gt;
+                &amp;lt;plugin&amp;gt;
+                    &amp;lt;groupId&amp;gt;org.eclipse.jkube&amp;lt;/groupId&amp;gt;
+                    &amp;lt;artifactId&amp;gt;openshift-maven-plugin&amp;lt;/artifactId&amp;gt;
+                    &amp;lt;version&amp;gt;1.0.2&amp;lt;/version&amp;gt;
+                    &amp;lt;configuration&amp;gt;
+                        &amp;lt;resources&amp;gt;
+                            &amp;lt;env&amp;gt;
+                                &amp;lt;GC_MAX_METASPACE_SIZE&amp;gt;256&amp;lt;/GC_MAX_METASPACE_SIZE&amp;gt;
+                                &amp;lt;GC_METASPACE_SIZE&amp;gt;96&amp;lt;/GC_METASPACE_SIZE&amp;gt;
+                            &amp;lt;/env&amp;gt;
+                        &amp;lt;/resources&amp;gt;
+                    &amp;lt;/configuration&amp;gt;
+                    &amp;lt;executions&amp;gt;
+                        &amp;lt;execution&amp;gt;
+                            &amp;lt;goals&amp;gt;
+                                &amp;lt;goal&amp;gt;resource&amp;lt;/goal&amp;gt;
+                                &amp;lt;goal&amp;gt;build&amp;lt;/goal&amp;gt;
+                                &amp;lt;goal&amp;gt;apply&amp;lt;/goal&amp;gt;
+                            &amp;lt;/goals&amp;gt;
+                        &amp;lt;/execution&amp;gt;
+                    &amp;lt;/executions&amp;gt;
+                &amp;lt;/plugin&amp;gt;
+            &amp;lt;/plugins&amp;gt;
+        &amp;lt;/build&amp;gt;
+    &amp;lt;/profile&amp;gt;
+&amp;lt;/profiles&amp;gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The &lt;em&gt;jkube.generator.from&lt;/em&gt; specifies the base image our application is going to use. The Zero-Config capability of the JKube maven plugin will add
+one base layer if you do not specify this configuration. However, for our demo, we have chosen &lt;a href=&quot;https://catalog.redhat.com/software/containers/ubi8/openjdk-11/5dd6a4b45a13461646f677f4&quot;&gt;registry.redhat.io/ubi8/openjdk-11&lt;/a&gt; as base image.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;When we are using this ubi8/openjdk-11 base image, we have to configure the GC metaspace sizes. We can add environment variables by specifying them in the &lt;strong&gt;resources/env&lt;/strong&gt; section.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We have also configured the &lt;strong&gt;oc:resource&lt;/strong&gt;, &lt;strong&gt;oc:build&lt;/strong&gt; and &lt;strong&gt;oc:apply&lt;/strong&gt; maven goals on the JKube plugin. With the above configuration, we should be able to execute &lt;em&gt;mvn install -Popenshift&lt;/em&gt; to kick off all the process to build and deploy on OpenShift. In the following sections, we will go step by step, so we can explain what happens behind the scenes in each phase.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;building-and-verifying-the-bootable-jar-application-on-openshift&quot;&gt;Building and verifying the Bootable Jar application on OpenShift&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We will use &lt;a href=&quot;https://github.com/code-ready/crc&quot;&gt;Red Hat CodeReady Containers (CRC)&lt;/a&gt; as a local OpenShift cluster. It brings a minimal OpenShift 4 cluster with one node to our local computer.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;olist arabic&quot;&gt;
+&lt;ol class=&quot;arabic&quot;&gt;
+&lt;li&gt;
+&lt;p&gt;Start CRC and create the new project where we are going to work on:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ crc start -p crc_license.txt
+$ oc login -u kubeadmin -p dpDFV-xamBW-kKAk3-Fi6Lg https://api.crc.testing:6443
+$ oc new-project wildfly-cluster-demo
+Now using project &quot;wildfly-cluster-demo&quot; on server &quot;https://api.crc.testing:6443&quot;.&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Our application uses the KUBE_PING protocol so we need to grant authorization to the service account the pod is running under:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ oc policy add-role-to-user view system:serviceaccount:$(oc project -q):default -n $(oc project -q)
+clusterrole.rbac.authorization.k8s.io/view added: &quot;system:serviceaccount:wildfly-cluster-demo:default&quot;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Build our application by using the &lt;em&gt;openshift&lt;/em&gt; maven profile:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;wildfly-clustering-demo$ mvn clean package -Popenshift&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Let us take a look at some points at this stage:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;The JKube &lt;em&gt;oc:resource&lt;/em&gt; is bound to the resource maven phase:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;[INFO] --- openshift-maven-plugin:1.0.2:resource (default) @ wildfly-clustering-demo ---
+[INFO] oc: Using docker image name of namespace: wildfly-cluster-demo
+[INFO] oc: Running generator wildfly-jar
+[INFO] oc: wildfly-jar: Using Docker image registry.redhat.io/ubi8/openjdk-11:latest as base / builder
+[INFO] oc: Using resource templates from /home/yborgess/dev/projects/wildfly-clustering-demo/src/main/jkube
+[INFO] oc: jkube-controller: Adding a default DeploymentConfig
+[INFO] oc: jkube-service: Adding a default service 'wildfly-clustering-demo' with ports [8080]
+[WARNING] oc: jkube-image: Environment variable GC_MAX_METASPACE_SIZE will not be overridden: trying to set the value 256, but its actual value is 256
+[WARNING] oc: jkube-image: Environment variable GC_METASPACE_SIZE will not be overridden: trying to set the value 96, but its actual value is 96
+[INFO] oc: jkube-healthcheck-wildfly-jar: Adding readiness probe on port 9990, path='/health/ready', scheme='HTTP', with initial delay 10 seconds
+[INFO] oc: jkube-healthcheck-wildfly-jar: Adding liveness probe on port 9990, path='/health/live', scheme='HTTP', with initial delay 60 seconds
+[INFO] oc: jkube-revision-history: Adding revision history limit to 2&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;At the resource phase, JKube prepares all the OpenShift resources needed to deploy the application. You can inspect what resources are going to be deployed by looking at &lt;strong&gt;target/classes/META-INF/jkube/openshift.yml&lt;/strong&gt; file. You will find the following:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;openblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;A &lt;em&gt;service&lt;/em&gt; exposing the 8080 port.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;A &lt;em&gt;route&lt;/em&gt; exposing this service.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;A &lt;em&gt;deploymentConfig&lt;/em&gt; which defines and starts our pods. On this file you can see the probes, and our required environment variables; GC_MAX_METASPACE_SIZE and GC_METASPACE_SIZE added manually by us on the plugin configuration, KUBERNETES_NAMESPACE added automatically.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Create the OpenShift specific builds:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ mvn oc:build -Popenshift&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;At this step, JKube has created by us:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;Our contanerized application. You can check the generated dockerfile at &lt;strong&gt;target/docker/wildfly-clustering-demo/1.0/build/Dockerfile&lt;/strong&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;An OpenShift &lt;em&gt;BuildConfig&lt;/em&gt; object that uses as the source base image our containerized application:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ oc describe buildconfig/wildfly-clustering-demo-s2i
+Name:		wildfly-clustering-demo-s2i
+Namespace:	wildfly-cluster-demo
+Created:	47 minutes ago
+Labels:		app=wildfly-clustering-demo
+            group=org.wildfly.s2i
+            provider=jkube
+            version=1.0
+Annotations:	&amp;lt;none&amp;gt;
+Latest Version:	1
+
+Strategy:		Source
+From Image:		DockerImage registry.redhat.io/ubi8/openjdk-11:latest
+Pull Secret Name:	pullsecret-jkube
+Output to:		ImageStreamTag wildfly-clustering-demo:1.0
+Binary:			provided on build&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;This &lt;em&gt;BuildConfig&lt;/em&gt; is built automatically resulting in an &lt;em&gt;ImageStreamTag&lt;/em&gt; available. You can verify the build by issuing:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ oc logs pods/wildfly-clustering-demo-s2i-1-build&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;We have now an &lt;em&gt;ImageStreamTag&lt;/em&gt; named &lt;em&gt;wildfly-clustering-demo:1.0&lt;/em&gt; built. Now we can deploy the application by using &lt;em&gt;oc:apply&lt;/em&gt; maven goal:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ mvn oc:apply -Popenshift
+$ mvn oc:apply -Popenshift
+[INFO] Scanning for projects...
+[INFO]
+[INFO] --------------&amp;lt; org.wildfly.s2i:wildfly-clustering-demo &amp;gt;---------------
+[INFO] Building maven-web 1.0
+[INFO] --------------------------------[ war ]---------------------------------
+[INFO]
+[INFO] --- openshift-maven-plugin:1.0.2:apply (default-cli) @ wildfly-clustering-demo ---
+[INFO] oc: Using OpenShift at https://api.crc.testing:6443/ in namespace wildfly-cluster-demo with manifest /home/yborgess/dev/projects/wildfly-clustering-demo/target/classes/META-INF/jkube/openshift.yml
+[INFO] oc: OpenShift platform detected
+[INFO] oc: Using project: wildfly-cluster-demo
+[INFO] oc: Creating a Service from openshift.yml namespace wildfly-cluster-demo name wildfly-clustering-demo
+[INFO] oc: Created Service: target/jkube/applyJson/wildfly-cluster-demo/service-wildfly-clustering-demo.json
+[INFO] oc: Creating a DeploymentConfig from openshift.yml namespace wildfly-cluster-demo name wildfly-clustering-demo
+[INFO] oc: Created DeploymentConfig: target/jkube/applyJson/wildfly-cluster-demo/deploymentconfig-wildfly-clustering-demo.json
+[INFO] oc: Creating Route wildfly-cluster-demo:wildfly-clustering-demo host: null
+[INFO] oc: HINT: Use the command `oc get pods -w` to watch your pods start up
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We should have in our local OpenShift cluster the following &lt;em&gt;DeploymentConfig&lt;/em&gt; object created by JKube:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ oc describe dc/wildfly-clustering-demo
+Name:		wildfly-clustering-demo
+Namespace:	wildfly-cluster-demo
+Created:	57 seconds ago
+Labels:		app=wildfly-clustering-demo
+		group=org.wildfly.s2i
+		provider=jkube
+		version=1.0
+Annotations:	app.openshift.io/vcs-ref=master
+		app.openshift.io/vcs-uri=https://github.com/yersan/wildfly-clustering-demo.git
+		jkube.io/git-branch=master
+		jkube.io/git-commit=b5cfa009b7724065260c3a5c9d45733978626797
+		jkube.io/git-url=https://github.com/yersan/wildfly-clustering-demo.git
+Latest Version:	1
+Selector:	app=wildfly-clustering-demo,group=org.wildfly.s2i,provider=jkube
+Replicas:	1
+Triggers:	Config, Image(wildfly-clustering-demo@1.0, auto=true)
+Strategy:	Rolling
+Template:
+Pod Template:
+  Labels:	app=wildfly-clustering-demo
+		group=org.wildfly.s2i
+		provider=jkube
+		version=1.0
+  Annotations:	app.openshift.io/vcs-ref: master
+		app.openshift.io/vcs-uri: https://github.com/yersan/wildfly-clustering-demo.git
+		jkube.io/git-branch: master
+		jkube.io/git-commit: b5cfa009b7724065260c3a5c9d45733978626797
+		jkube.io/git-url: https://github.com/yersan/wildfly-clustering-demo.git
+  Containers:
+   wildfly-jar:
+    Image:	image-registry.openshift-image-registry.svc:5000/wildfly-cluster-demo/wildfly-clustering-demo@sha256:e8274e7de4c7b9d280ff20cb595a627754a80052b4c1e5e54738c490ac7e86e7
+    Ports:	8080/TCP, 9779/TCP, 8778/TCP
+    Host Ports:	0/TCP, 0/TCP, 0/TCP
+    Liveness:	http-get http://:9990/health/live delay=60s timeout=1s period=10s #success=1 #failure=3
+    Readiness:	http-get http://:9990/health/ready delay=10s timeout=1s period=10s #success=1 #failure=3
+    Environment:
+      GC_MAX_METASPACE_SIZE:	256
+      GC_METASPACE_SIZE:	96
+      KUBERNETES_NAMESPACE:	 (v1:metadata.namespace)
+...&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Notice the environment variables used in the pod template section and the probes. The deployment is also started automatically. You can monitor the progress by checking the pods running on the current OpenShift project:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ oc get pods -w&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Once your deployment finishes, scale up the application pod:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ oc scale dc wildfly-clustering-demo --replicas=2
+deploymentconfig.apps.openshift.io/wildfly-clustering-demo scaled&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;If you check the logs of your pods, you should notice a cluster has been created, for example:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;17:15:23,842 INFO  [org.infinispan.CLUSTER] (ServerService Thread Pool -- 49) ISPN000094: Received new cluster view for channel ee: [clustering-demo-1-vrt7h|1] (2) [clustering-demo-1-vrt7h, clustering-demo-1-cmmzn]&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Now we can verify our cluster is working as expected and verify the session data is replicated across all the cluster members.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Create session data and retrieve it to see on which pod it was created:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ curl --cookie-jar /tmp/session.txt -XPOST $(oc get route wildfly-clustering-demo -o=jsonpath='{.spec.host}')/api/jeans/2
+
+$ curl --cookie /tmp/session.txt -XPOST $(oc get route wildfly-clustering-demo -o=jsonpath='{.spec.host}')/api/shorts/4
+
+$ curl --cookie /tmp/session.txt -XGET $(oc get route wildfly-clustering-demo -o=jsonpath='{.spec.host}')/api/cart
+{&quot;host&quot;:&quot;wildfly-clustering-demo-1-zs8fg&quot;,&quot;sessionId&quot;:&quot;rLHbOGXWUBUmAoySM-1HpxNwFULzbyuhHTdcHUtv&quot;,&quot;cart&quot;:[{&quot;item&quot;:&quot;shorts&quot;,&quot;quantity&quot;:4},{&quot;item&quot;:&quot;jeans&quot;,&quot;quantity&quot;:2}]}&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Delete the pod which gave you the latest response and get the cart again through the same route. OpenShift will balance the load to the other pod available. We should get the same session data, verifying the replication works as expected:&lt;/p&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre&gt;$ oc delete pod wildfly-clustering-demo-1-zs8fg
+pod &quot;wildfly-clustering-demo-1-zs8fg&quot; deleted
+
+$ curl --cookie /tmp/session.txt -XGET $(oc get route wildfly-clustering-demo -o=jsonpath='{.spec.host}')/api/cart
+{&quot;host&quot;:&quot;wildfly-clustering-demo-1-cdv27&quot;,&quot;sessionId&quot;:&quot;rLHbOGXWUBUmAoySM-1HpxNwFULzbyuhHTdcHUtv&quot;,&quot;cart&quot;:[{&quot;item&quot;:&quot;shorts&quot;,&quot;quantity&quot;:4},{&quot;item&quot;:&quot;jeans&quot;,&quot;quantity&quot;:2}]}&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;/ol&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;conclusion&quot;&gt;Conclusion&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Combining the Bootable JAR with the JKube maven plugin is one option to simplify the workflow developing applications on OpenShift. Firstly, we have seen how you can work with your application locally and then, with minimal effort, how to adapt it to be deployed on OpenShift. In this specific example, we have explored the default discovery mechanism available on the Bootable JAR. This mechanism requires granting permissions on your cluster to add to JGroups the ability to discover other cluster members.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;You can find out more examples of how to use and work with the Bootable JAR &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/tree/3.0.2.Final/examples/&quot;&gt;here&lt;/a&gt;. If you have any question related, feel free to contact us joining to the &lt;a href=&quot;https://groups.google.com/forum/#!forum/wildfly&quot;&gt;WildFly community forums&lt;/a&gt; or &lt;a href=&quot;https://wildfly.zulipchat.com/&quot;&gt;Zulip Chat&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;</content>
+      
+
+      
+      
+      
+      
+      
+
+      <author>
+        <name>Yeray Borges</name>
+        
+        
+      </author>
+
+      
+        
+      
+
+      
+        <category term="wildfly" />
+      
+        <category term="galleon" />
+      
+        <category term="bootable" />
+      
+        <category term="jar" />
+      
+        <category term="bootable-jar" />
+      
+        <category term="clustering" />
+      
+        <category term="jkube" />
+      
+
+      
+        <summary type="html">Introduction</summary>
+      
+
+      
+      
+    </entry>
+  
+    <entry>
+      <title type="html">Developping on OpenShift with WildFly bootable jar</title>
+      <link href="https://wildfly.org//news/2021/01/24/odo-bootable-jar/" rel="alternate" type="text/html" title="Developping on OpenShift with WildFly bootable jar" />
+      <published>2021-01-24T00:00:00+00:00</published>
+      <updated>2021-01-24T00:00:00+00:00</updated>
+      <id>https://wildfly.org//news/2021/01/24/odo-bootable-jar</id>
+      
+      
+        <content type="html" xml:base="https://wildfly.org//news/2021/01/24/odo-bootable-jar/">&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;With the bootable jar feature of WildFly it is now easier to build applications for the cloud. You can trim the server to reduce its footprint which makes this a perfect candidate to build microservices on the cloud. Let&amp;#8217;s discover how to combine this feature to build and deploy applications on OpenShift.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;using-odo&quot;&gt;Using odo&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;&lt;a href=&quot;https://odo.dev/&quot;&gt;odo&lt;/a&gt; is a fast, iterative, and straightforward CLI tool for developers who write, build, and deploy applications on Kubernetes and OpenShift. odo abstracts away complex Kubernetes and OpenShift concepts for the developer.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;installing-odo&quot;&gt;Installing odo&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Download the binary from &lt;a href=&quot;https://mirror.openshift.com/pub/openshift-v4/clients/odo/&quot;&gt;odo download site&lt;/a&gt; according to your target environment and follow the instructions from &lt;a href=&quot;https://odo.dev/docs/installing-odo/&quot;&gt;odo website&lt;/a&gt;. Please note that you need at least the version 2.0.3 to use the devfile we will be using in the rest of this article.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;preparing-our-cloud-environement&quot;&gt;Preparing our cloud environement&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;During this article we will use the 'free' OpenShift &lt;a href=&quot;https://developers.redhat.com/developer-sandbox&quot;&gt;developer-sandbox&lt;/a&gt; that you can have with your account on &lt;a href=&quot;https://developers.redhat.com/&quot;&gt;Red Hat Developer&lt;/a&gt; website.
+Once you have your cloud environment we need to connect to it from odo.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight nowrap&quot;&gt;&lt;code&gt;odo login https://api.sandbox.x8i5.p1.openshiftapps.com:6443 --token=sha256~#################################
+Connecting to the OpenShift cluster
+
+Logged into &quot;https://api.sandbox.x8i5.p1.openshiftapps.com:6443&quot; as &quot;ehugonne1&quot; using the token provided.
+
+You have access to the following projects and can switch between them with 'odo project set &amp;lt;project-name&amp;gt;':
+
+  * ehugonne1-code
+    ehugonne1-dev
+    ehugonne1-stage
+
+Using project &quot;ehugonne1-code&quot;.&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;creating-the-new-project&quot;&gt;Creating the new project&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;First we need to create a namespace in OpenShift:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight nowrap&quot;&gt;&lt;code&gt;odo project create microprofile-config&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Now we can create our project using the &lt;strong&gt;microprofile-config&lt;/strong&gt; quickstart sample project.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight nowrap&quot;&gt;&lt;code&gt;mkdir odo-demo
+cd odo-demo
+odo create java-wildfly-bootable-jar --starter=microprofile-config
+Validation
+ ✓  Checking devfile existence [19047ns]
+ ✓  Creating a devfile component from registry: DefaultDevfileRegistry [31878ns]
+ ✓  Validating devfile component [153099ns]
+
+Starter Project
+ ✓  Downloading starter project microprofile-config from https://github.com/wildfly/quickstart.git [1m]
+
+Please use `odo push` command to create the component with source deployed&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;This will create the &lt;strong&gt;microprofile-config&lt;/strong&gt; quickstart Apache Maven project with a &lt;strong&gt;devfile.yaml&lt;/strong&gt; that describe how the project will be built and run on OpenShift.
+This devfile is the entry point of our whole project, you may think of it as the pom.xml for the cloud. They are fully described on &lt;a href=&quot;https://docs.devfile.io/devfile/2.0.0/user-guide/index.html&quot;&gt;Devfile User Guide 2.0.0&lt;/a&gt;.
+Let&amp;#8217;s take a quick look at the devfile and their main entry points. I&amp;#8217;ll pass the &lt;code&gt;starterProjects&lt;/code&gt; which are the quickstarts you can select when creating your initial project.
+First we can see that it defines two components:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;a &lt;strong&gt;jaeger&lt;/strong&gt; component that will provide an OpenTracing compatible server so that  Eclipse MicroProfile OpenTracing applications can send traces to.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;a &lt;strong&gt;wildfly&lt;/strong&gt; component which is a simple Java image with Apache Maven where the application will be built and run. It exposes only the &lt;strong&gt;8080&lt;/strong&gt; port for HTTP.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;a &lt;strong&gt;m2-repository&lt;/strong&gt; component which is a persistent volume that we will be using to avoid losing all the downloaded artefacts between each restart of the &lt;strong&gt;wildfly&lt;/strong&gt; container.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Then we have the list of commands available to build, debug and run our application:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;build&lt;/strong&gt;: this will compile and build a bootable jar from the sources.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;run&lt;/strong&gt;: this will start and run the bootable jar.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;debug&lt;/strong&gt;: this will start and run the bootable jar in debug mode.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;dev-build&lt;/strong&gt;: this will compile and build a bootable jar from the sources so that it can be used in developper mode which means the server won&amp;#8217;t get rebuilt nor restarted when the application is modified.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;dev-run&lt;/strong&gt;: this will start and run the bootable jar in developper mode which means the server won&amp;#8217;t get rebuilt nor restarted when the application is modified.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;dev-debug&lt;/strong&gt;: this will start and run the bootable jar in debug developper mode which means the server won&amp;#8217;t get rebuilt nor restarted when the application is modified.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;watch-build&lt;/strong&gt;: this will do nothing except print a nice message.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;watch-run&lt;/strong&gt;: this will start the bootable jar in watch mode.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;strong&gt;watch-debug&lt;/strong&gt;: this will start the bootable jar in watch mode with debug on.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;building-and-running-the-application&quot;&gt;Building and running the application&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;So let&amp;#8217;s just build and start our application&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight nowrap&quot;&gt;&lt;code&gt;odo push
+
+Validation
+ ✓  Validating the devfile [290197ns]
+
+Creating Kubernetes resources for component java-wildfly-bootable-jar
+ ✓  Waiting for component to start [29s]
+
+Applying URL changes
+ ✓  URL tracing-ui: http://tracing-ui-java-wildfly-bootable-jar-ehugonne1-code.apps.sandbox.x8i5.p1.openshiftapps.com/ created
+ ✓  URL http: http://http-java-wildfly-bootable-jar-ehugonne1-code.apps.sandbox.x8i5.p1.openshiftapps.com/ created
+
+Syncing to component java-wildfly-bootable-jar
+ ✓  Checking files for pushing [1ms]
+ ✓  Syncing files to the component [4s]
+
+Executing devfile commands for component java-wildfly-bootable-jar
+ ✓  Executing watch-build command &quot;echo 'It's watcher mode Baby !!!''&quot; [2s]
+ ✓  Executing watch-run command &quot;mvn ${MVN_ARGS_APPEND} -Dwildfly.bootable.arguments=\&quot;-b=0.0.0.0\&quot; org.wildfly.plugins:wildfly-jar-maven-plugin:dev-watch -e -DskipTests&quot;, if not running [2s]
+
+Pushing devfile component java-wildfly-bootable-jar
+ ✓  Changes successfully pushed to component&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;You can get the url to access your application with&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight nowrap&quot;&gt;&lt;code&gt;oc get route java-wildfly-bootable-jar&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Now we can access the application on this URL.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;building-and-debugging-the-application-in-developper-mode&quot;&gt;Building and debugging the application in developper mode&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;To develop our application we provide a set of commands in to get feedbacks more quickly than with the default commands.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;admonitionblock important&quot;&gt;
+&lt;table&gt;
+&lt;tr&gt;
+&lt;td class=&quot;icon&quot;&gt;
+&lt;div class=&quot;title&quot;&gt;Important&lt;/div&gt;
+&lt;/td&gt;
+&lt;td class=&quot;content&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The developper mode will only provision the server on the first build. That means that if you want to change the layers or the configuration of the server you will need to delete your application and push it again.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/table&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;So let&amp;#8217;s start our server in developper mode with debug enabled.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight nowrap&quot;&gt;&lt;code&gt;odo push --debug --build-command dev-build --debug-command dev-debug
+
+Validation
+ ✓  Validating the devfile [165733ns]
+
+Creating Kubernetes resources for component java-jboss-eap-xp-bootable-jar
+ ✓  Waiting for component to start [15s]
+
+Applying URL changes
+ ✓  URL tracing-ui: http://tracing-ui-java-jboss-eap-xp-bootable-jar-microprofile-config.apps-crc.testing/ created
+ ✓  URL http: http://http-java-jboss-eap-xp-bootable-jar-microprofile-config.apps-crc.testing/ created
+
+Syncing to component java-jboss-eap-xp-bootable-jar
+ ✓  Checking files for pushing [2ms]
+ ✓  Syncing files to the component [825ms]
+
+Executing devfile commands for component java-jboss-eap-xp-bootable-jar
+ ✓  Executing dev-build command &quot;mvn -Pbootable-jar -Dinsecure.repositories=WARN -Dmaven.repo.local=/home/jboss/.m2/repository -Dmaven.test.skip=true -Ddev package&quot; [11m]
+ ✓  Executing dev-debug command &quot;mvn -Pbootable-jar -Dinsecure.repositories=WARN -Dwildfly.bootable.arguments=\&quot;-b=0.0.0.0\&quot; -Dwildfly.bootable.jvmArguments=\&quot;-agentlib:jdwp=transport=dt_socket,address=0.0.0.0:${DEBUG_PORT},server=y,suspend=n\&quot; -Dmaven.repo.local=/home/jboss/.m2/repository wildfly-jar:dev&quot;, if not running [1s]
+
+Pushing devfile component java-jboss-eap-xp-bootable-jar
+ ✓  Changes successfully pushed to component&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;If we edit the source code and push our changes you can see that the deployment is quicker.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Now let&amp;#8217;s try to debug our application.
+First we need to create a tunnel to access the listening debug port on our application, so in a new terminal we need to execute:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight nowrap&quot;&gt;&lt;code&gt;odo debug port-forward -l 8787
+Started port forwarding at ports - 8787:5858&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Now we can connect to debug our application on port 8787 with our IDE and debug as usual. Quite simple is&amp;#8217;nt it ?&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;using-the-watch-mode&quot;&gt;Using the watch mode&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Now that we managed to build, run and debug our application on OpenShift we still need to execute commands to push our changes to the cloud. It would be nice to just have things updated automatically.
+odo provides a nice watch command that will push changes to OpenShift. But the bootable maven plugin offers also a watch mode that will have it recompile the application and redeploy it automatically when the code change.
+So let&amp;#8217;s take advantage of those two modes.
+First we need to start our application in debug and watch mode:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight nowrap&quot;&gt;&lt;code&gt;odo push --debug --build-command watch-build --debug-command watch-debug
+
+Validation
+ ✓  Validating the devfile [34305ns]
+
+Creating Kubernetes resources for component java-wildfly-bootable-jar
+ ✓  Waiting for component to start [21s]
+
+Applying URL changes
+ ✓  URLs are synced with the cluster, no changes are required.
+
+Syncing to component java-wildfly-bootable-jar
+ ✓  Checking file changes for pushing [1ms]
+ ✓  Syncing files to the component [4s]
+
+Executing devfile commands for component java-wildfly-bootable-jar
+ ✓  Executing watch-build command &quot;echo 'It's watcher mode Baby !!!''&quot; [812ms]
+ ✓  Executing watch-debug command &quot;mvn ${MVN_ARGS_APPEND} -Dwildfly.bootable.arguments=\&quot;-b=0.0.0.0\&quot; -Dwildfly.bootable.jvmArguments=\&quot;-agentlib:jdwp=transport=dt_socket,address=0.0.0.0:${DEBUG_PORT},server=y,suspend=n\&quot; org.wildfly.plugins:wildfly-jar-maven-plugin:dev-watch -e&quot;, if not running [2s]
+
+Pushing devfile component java-wildfly-bootable-jar
+ ✓  Changes successfully pushed to component&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Now we can set odo in watch mode too:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight nowrap&quot;&gt;&lt;code&gt;odo watch
+Component is running in debug mode
+Please start port-forwarding in a different terminal
+Waiting for something to change in /home/ehsavoie/tmp/test&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;When you edit a file like &lt;code&gt;src/main/resources/META-INF/microprofile-config.properties&lt;/code&gt;, you can see the following on the console:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight nowrap&quot;&gt;&lt;code&gt;File /home/ehsavoie/tmp/test/src/main/resources/META-INF/microprofile-config.properties changed
+Pushing files...
+
+Validation
+ ✓  Validating the devfile [145787ns]
+
+Creating Kubernetes resources for component java-wildfly-bootable-jar
+ ✓  Waiting for component to start [132ms]
+
+Applying URL changes
+ ✓  URLs are synced with the cluster, no changes are required.
+
+Syncing to component java-wildfly-bootable-jar
+ ✓  Checking file changes for pushing [1ms]
+ ✓  Syncing files to the component [994ms]
+
+Executing devfile commands for component java-wildfly-bootable-jar
+ ✓  Executing watch-build command &quot;echo 'It's watcher mode Baby !!!''&quot; [808ms]
+ ✓  Executing watch-debug command &quot;mvn ${MVN_ARGS_APPEND} -Dwildfly.bootable.arguments=\&quot;-b=0.0.0.0\&quot; -Dwildfly.bootable.jvmArguments=\&quot;-agentlib:jdwp=transport=dt_socket,address=0.0.0.0:${DEBUG_PORT},server=y,suspend=n\&quot; org.wildfly.plugins:wildfly-jar-maven-plugin:dev-watch -e&quot;, if not running [851ms]
+Component is running in debug mode
+Please start port-forwarding in a different terminal
+Waiting for something to change in /home/ehsavoie/tmp/test&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;And of course since we used a debug command, you can connect your IDE on port 8787 and debug as usual.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;So as we have seen, developping on OpenShift is now very easy and simple and almost as slick as local development.
+All the more so as you can add several containers on your pod. In the sample devfile that is provided you have a Jaeger Server that is running. Connecting to its web interface (exposed throught a route too), you can see the traces produced by our application.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;</content>
+      
+
+      
+      
+      
+      
+      
+
+      <author>
+        <name>Emmanuel Hugonnet</name>
+        
+        
+      </author>
+
+      
+        
+      
+
+      
+        <category term="openshift" />
+      
+        <category term="cloud" />
+      
+        <category term="wildfly" />
+      
+        <category term="odo" />
+      
+        <category term="bootable-jar" />
+      
+
+      
+        <summary type="html">With the bootable jar feature of WildFly it is now easier to build applications for the cloud. You can trim the server to reduce its footprint which makes this a perfect candidate to build microservices on the cloud. Let&amp;#8217;s discover how to combine this feature to build and deploy applications on OpenShift.</summary>
+      
+
+      
+      
+    </entry>
+  
+    <entry>
+      <title type="html">Planned Security Features for WildFly</title>
+      <link href="https://wildfly-security.github.io/wildfly-elytron/blog/planned-security-features-for-wildfly-23/" rel="alternate" type="text/html" title="Planned Security Features for WildFly" />
+      <published>2021-01-22T00:00:00+00:00</published>
+      <updated>2021-01-22T00:00:00+00:00</updated>
+      <id>https://wildfly-security.github.io/wildfly-elytron/blog/planned-security-features-for-wildfly-23/</id>
+      
+      
+        <content type="html" xml:base="https://wildfly-security.github.io/wildfly-elytron/blog/planned-security-features-for-wildfly-23/"></content>
+      
+
+      
+      
+      
+      
+      
+
+      <author>
+        <name>Farah Juma</name>
+        
+        
+      </author>
+
+      
+        
+      
+
+      
+        <category term="elytron" />
+      
+        <category term="wildfly" />
+      
+
+      
+
+      
+      
+    </entry>
+  
+    <entry>
+      <title type="html">WildFly Bootable JAR 3.0 is released!</title>
+      <link href="https://wildfly.org//news/2021/01/15/bootable-jar-3.0.Final-Released/" rel="alternate" type="text/html" title="WildFly Bootable JAR 3.0 is released!" />
+      <published>2021-01-15T00:00:00+00:00</published>
+      <updated>2021-01-15T00:00:00+00:00</updated>
+      <id>https://wildfly.org//news/2021/01/15/bootable-jar-3.0.Final-Released</id>
+      
+      
+        <content type="html" xml:base="https://wildfly.org//news/2021/01/15/bootable-jar-3.0.Final-Released/">&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The version 3.0 of the &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/&quot;&gt;WildFly Bootable JAR Maven plugin&lt;/a&gt; has been released.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;For people who are not familiar with WildFly Bootable JAR, I strongly recommend that you read
+this &lt;a href=&quot;https://www.wildfly.org/news/2020/10/19/bootable-jar-2.0-released/&quot;&gt;blog post&lt;/a&gt; that covers it in detail.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The new features that come in this release (in particular the  &lt;code&gt;dev-watch&lt;/code&gt; goal) have already been covered
+when &lt;a href=&quot;https://www.wildfly.org/news/2020/12/15/bootable-jar-3.0.Beta-Released/&quot;&gt;announcing&lt;/a&gt; the Beta1 release. The Bootable JAR &lt;a href=&quot;https://docs.wildfly.org/bootablejar/&quot;&gt;documentation&lt;/a&gt;
+ contains a new &lt;a href=&quot;https://docs.wildfly.org/bootablejar/#_development_mode_with_source_watching&quot;&gt;chapter&lt;/a&gt; that provides details on the &lt;code&gt;dev-watch&lt;/code&gt; goal.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Since Beta1, the Bootable JAR &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/tree/3.0.2.Final/examples/&quot;&gt;examples&lt;/a&gt;  have been evolved to use WildFly 22.0.0.Final
+that has just been &lt;a href=&quot;https://www.wildfly.org/news/2021/01/13/WildFly22-Final-Released/&quot;&gt;released&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;In this blog post I will focus on the integration with &lt;a href=&quot;https://www.keycloak.org/&quot;&gt;Keycloak&lt;/a&gt;. This integration is now possible
+thanks to the Keycloak Galleon feature-pack that is new in &lt;a href=&quot;https://www.keycloak.org/downloads&quot;&gt;Keycloak 12.0.0&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;keycloak-galleon-feature-pack&quot;&gt;Keycloak Galleon feature-pack&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The &lt;a href=&quot;https://repo1.maven.org/maven2/org/keycloak/keycloak-adapter-galleon-pack/&quot;&gt;Keycloak Galleon feature-pack&lt;/a&gt; provides
+an OIDC client adapter by the means of a Galleon layer.
+The &lt;code&gt;keycloak-client-oidc&lt;/code&gt; Galleon layer brings the OIDC keycloak subsystem (and associated JBoss modules) and
+configures the server security. For more information on the Keycloak Galleon feature-pack usage with WildFly,
+you can read the &lt;a href=&quot;https://docs.wildfly.org/22/WildFly_Elytron_Security.html#Keycloak_Integration&quot;&gt;dedicated chapter&lt;/a&gt; in the WildFly documentation.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Using the Bootable JAR Maven plugin, you can combine layers coming from multiple Galleon feature-packs.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;In your plugin configuration it looks like:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight&quot;&gt;&lt;code class=&quot;language-xml&quot; data-lang=&quot;xml&quot;&gt;&amp;lt;configuration&amp;gt;
+  &amp;lt;feature-packs&amp;gt;
+    &amp;lt;feature-pack&amp;gt;
+      &amp;lt;location&amp;gt;wildfly@maven(org.jboss.universe:community-universe)&amp;lt;/location&amp;gt;
+    &amp;lt;/feature-pack&amp;gt;
+    &amp;lt;feature-pack&amp;gt;
+       &amp;lt;location&amp;gt;org.keycloak:keycloak-adapter-galleon-pack:12.0.1&amp;lt;/location&amp;gt;
+     &amp;lt;/feature-pack&amp;gt;
+  &amp;lt;/feature-packs&amp;gt;
+  &amp;lt;layers&amp;gt;
+    &amp;lt;layer&amp;gt;web-server&amp;lt;/layer&amp;gt;
+     &amp;lt;layer&amp;gt;keycloak-client-oidc&amp;lt;/layer&amp;gt;
+  &amp;lt;/layers&amp;gt;
+...
+&amp;lt;/configuration&amp;gt;&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;You will notice that the &lt;code&gt;&amp;lt;location&amp;gt;&lt;/code&gt; element is structured differently for the WildFly feature-pack and the Keycloak one.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The WildFly feature-pack is accessible from the Galleon &lt;code&gt;community-universe&lt;/code&gt;. Retrieving the WildFly feature-pack from this universe
+allows us to not specify any version and get the latest one.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Since the Keycloak Galleon feature-pack is not registered inside an universe, you need to specify its Maven coordinates.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;When building a Bootable JAR, the plugin retrieves the feature-packs from Maven repositories and provisions a server based on the set of Galleon layers.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;You can follow the steps documented in this &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/tree/3.0.2.Final/examples/keycloak&quot;&gt;example&lt;/a&gt;
+to secure a servlet deployed inside a Bootable JAR using Keycloak.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;developing-on-openshift-with-bootable-jar&quot;&gt;Developing on OpenShift with Bootable JAR&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We are currently working at defining &lt;a href=&quot;https://odo.dev/&quot;&gt;ODO&lt;/a&gt; dev files in order to make for a smooth and
+efficient development experience on OpenShift. Changes done in your local Maven project fire automatic
+re-build and re-deploy of your application in the remote  OpenShift cluster POD.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;To achieve this, we are leveraging the ODO source watching capabilities to push changes onto your OpenShift POD.
+&lt;code&gt;dev-watch&lt;/code&gt; goal, that is running in the POD, takes over and automatically re-build/re-deploy your application.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Stay tuned!&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;known-issues&quot;&gt;Known issues&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We have encountered an issue when using the &lt;code&gt;dev-watch&lt;/code&gt; goal with the &lt;a href=&quot;https://github.com/wildfly/quickstart/tree/22.0.0.Final&quot;&gt;WildFly microprofile-* quickstarts&lt;/a&gt;. You need to upgrade the plugin to 3.0.2.Final
+to allow for &lt;code&gt;dev-watch&lt;/code&gt; to properly operate. The Maven command to use is: &lt;code&gt;mvn wildfly-jar:dev-watch -Pbootable-jar -Dversion.wildfly-jar.maven.plugin=3.0.2.Final&lt;/code&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;to-conclude&quot;&gt;To conclude&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;If you have an interesting use-case, simple enough to be reduced to a simple example, and it is not covered
+by the &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/tree/3.0.2.Final/examples/&quot;&gt;examples&lt;/a&gt;,  then
+feel free to &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/pulls&quot;&gt;contribute&lt;/a&gt; one. We will be very happy to help you integrate your example in the project. Just ask!&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Finally we would really appreciate that you keep us posted with your feedback and new requirements (that you can log as new
+&lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/issues&quot;&gt;project issues&lt;/a&gt;), this will help evolve the WildFly Bootable JAR experience in the right direction.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Thank-you!&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;JF Denise&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;</content>
+      
+
+      
+      
+      
+      
+      
+
+      <author>
+        <name>Jean-François Denise</name>
+        
+        
+      </author>
+
+      
+        
+      
+
+      
+        <category term="wildfly" />
+      
+        <category term="galleon" />
+      
+        <category term="bootable" />
+      
+        <category term="jar" />
+      
+        <category term="bootable-jar" />
+      
+
+      
+        <summary type="html">The version 3.0 of the WildFly Bootable JAR Maven plugin has been released.</summary>
+      
+
+      
+      
+    </entry>
+  
+    <entry>
+      <title type="html">Using case principal transformers in Elytron</title>
+      <link href="https://wildfly-security.github.io/wildfly-elytron/blog/case-principal-transformer/" rel="alternate" type="text/html" title="Using case principal transformers in Elytron" />
+      <published>2021-01-14T00:00:00+00:00</published>
+      <updated>2021-01-14T00:00:00+00:00</updated>
+      <id>https://wildfly-security.github.io/wildfly-elytron/blog/case-principal-transformer/</id>
+      
+      
+        <content type="html" xml:base="https://wildfly-security.github.io/wildfly-elytron/blog/case-principal-transformer/"></content>
+      
+
+      
+      
+      
+      
+      
+
+      <author>
+        <name>Sonia Zaldana Calles</name>
+        
+        
+      </author>
+
+      
+        
+      
+
+      
+        <category term="elytron" />
+      
+        <category term="wildfly" />
+      
+
+      
+
+      
+      
+    </entry>
+  
+    <entry>
+      <title type="html">How to properly stop batch processing job and step in WildFly</title>
+      <link href="https://wildfly.org//news/2021/01/14/batch-processing-stop-job-step/" rel="alternate" type="text/html" title="How to properly stop batch processing job and step in WildFly" />
+      <published>2021-01-14T00:00:00+00:00</published>
+      <updated>2021-01-14T00:00:00+00:00</updated>
+      <id>https://wildfly.org//news/2021/01/14/batch-processing-stop-job-step</id>
+      
+      
+        <content type="html" xml:base="https://wildfly.org//news/2021/01/14/batch-processing-stop-job-step/">&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Batch jobs are long-running background processing tasks, and therefore it&amp;#8217;s
+common that user may need to pause or stop the execution.  WildFly, which
+implements batch processing through its jberet component based on JSR 352
+and &lt;a href=&quot;https://projects.eclipse.org/projects/ee4j.batch&quot;&gt;Jakarta Batch Specification&lt;/a&gt;,
+offers a variety of ways to achieve that requirement.  This post will
+demonstrate how to stop a running job execution, or individual step execution,
+and some design and implementation consideration.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;properly-stop-a-running-job-execution&quot;&gt;Properly stop a running job execution&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Batch spec defines a standard API for stopping a running job execution:
+&lt;a href=&quot;https://jakarta.ee/specifications/platform/9/apidocs/jakarta/batch/operations/JobOperator.html#stop-long-&quot;&gt;javax.batch.operations.JobOperator#stop&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;As stated in its &lt;a href=&quot;https://javaee.github.io/javaee-spec/javadocs/javax/batch/operations/JobOperator.html#stop-long-&quot;&gt;javadoc&lt;/a&gt;,
+calling &lt;code&gt;JobOperator.stop()&lt;/code&gt; sends a stop request to the batch container, which tries its best effort to stop
+the running job execution. So it&amp;#8217;s important to implement batch application that properly responds to a stop request.
+In the following sections, I&amp;#8217;ll explain what it entails for the two different types of steps: batchlet step and chunk step.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;stop-a-running-job-execution-that-contains-batchlet-step&quot;&gt;Stop a running job execution that contains batchlet step&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;A batchelt step represents a free-form, opaque task that is fully controlled by the batch application. The batch container
+has no chance to intervene once the batchlet starts its processing. So the batchlet class is responsible for providing
+a way to stop itself, if it wants to support graceful stop. That&amp;#8217;s why &lt;code&gt;javax.batch.api.Batchlet&lt;/code&gt; interface declares a
+&lt;code&gt;stop()&lt;/code&gt; method that a batchlet class must implement.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;In the example batchlet class below, once it receives a stop request in its &lt;code&gt;stop()&lt;/code&gt; method, it sets the &lt;code&gt;toStop&lt;/code&gt; flag
+to &lt;code&gt;true&lt;/code&gt;. Its &lt;code&gt;process()&lt;/code&gt; method periodically checks this flag to determine if it needs to stop processing.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Note that bathlet &lt;code&gt;stop()&lt;/code&gt; method is called asynchronously while the batchlet &lt;code&gt;process()&lt;/code&gt; method is running in a
+different thread. And the batchlet class should be implemented to properly handle concurrency.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight&quot;&gt;&lt;code class=&quot;language-java&quot; data-lang=&quot;java&quot;&gt;@Named
+public class Batchlet1 implements Batchlet {
+    private final AtomicBoolean toStop = new AtomicBoolean();
+
+    @Override
+    public String process() throws Exception {
+        String exitStatus = &quot;BATCHLET1_COMPLETED&quot;;
+        while (true) {
+            if (toStop.get()) {
+                exitStatus = &quot;BATCHLET1_STOPPED&quot;;
+                break;
+            }
+            // perform batchlet task, such as downloading and copying files, sending emails, etc.
+        }
+        return exitStatus;
+    }
+
+    @Override
+    public void stop() throws Exception {
+        toStop.set(true);
+    }
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;After the batch application is deployed to WildFly, you can start and stop a job execution in WildFly CLI:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight&quot;&gt;&lt;code class=&quot;language-text&quot; data-lang=&quot;text&quot;&gt;# To start a new job execution
+#
+/deployment=numbers-chunk.war/subsystem=batch-jberet:start-job(job-xml-name=numbers)
+{
+    &quot;outcome&quot; =&amp;gt; &quot;success&quot;,
+    &quot;result&quot; =&amp;gt; 1L
+}
+
+# To stop the running job execution
+#
+/deployment=numbers-chunk.war/subsystem=batch-jberet:stop-job(execution-id=1)
+{&quot;outcome&quot; =&amp;gt; &quot;success&quot;}&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The above &lt;code&gt;stop-job&lt;/code&gt; CLI operation calls &lt;code&gt;JobOperator.stop(jobExecutionId)&lt;/code&gt; behind the scene, and eventually the
+batchlet &lt;code&gt;stop()&lt;/code&gt; method is called to receive the stop request.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The following CLI commands checks the status of the stopped job execution, and a stopped job execution can be
+restarted from where it left off.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight&quot;&gt;&lt;code class=&quot;language-text&quot; data-lang=&quot;text&quot;&gt;# To check the status of the stopped job execution:
+#
+/deployment=numbers-chunk.war/subsystem=batch-jberet/job=numbers/execution=1:read-resource(include-runtime, recursive)
+{
+    &quot;outcome&quot; =&amp;gt; &quot;success&quot;,
+    &quot;result&quot; =&amp;gt; {
+        &quot;batch-status&quot; =&amp;gt; &quot;STOPPED&quot;,
+        &quot;create-time&quot; =&amp;gt; &quot;2020-10-29T19:33:13.843-0400&quot;,
+        &quot;end-time&quot; =&amp;gt; &quot;2020-10-29T19:33:30.258-0400&quot;,
+        &quot;exit-status&quot; =&amp;gt; &quot;STOPPED&quot;,
+        &quot;instance-id&quot; =&amp;gt; 1L,
+        &quot;last-updated-time&quot; =&amp;gt; &quot;2020-10-29T19:33:30.258-0400&quot;,
+        &quot;start-time&quot; =&amp;gt; &quot;2020-10-29T19:33:13.853-0400&quot;
+    }
+}
+
+# To restart the previously stopped job execution:
+#
+/deployment=numbers-chunk.war/subsystem=batch-jberet:restart-job(execution-id=3)
+{
+    &quot;outcome&quot; =&amp;gt; &quot;success&quot;,
+    &quot;result&quot; =&amp;gt; 4L
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;You can also perform all the above operations in WildFly Management Console. For example, the following
+screenshot shows the UI to stop a job execution:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;imageblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;img src=&quot;/assets/img/news/jberet/jberet-stop-job.png&quot; alt=&quot;Stop Batch Job Execution&quot;&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;stop-a-running-job-execution-that-contains-chunk-step&quot;&gt;Stop a running job execution that contains chunk step&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;A chunk step is basically a read-process-write loop and naturally supports stop operation. The batch container can
+intervene at certain junctures amid the iterations. So unlike a batchlet step, there is no required method to implement
+in order to support stop.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;However, since a graceful stop will wait for the current chunk to complete, the chunk step
+should choose a suitable chunk size (configured in &lt;code&gt;item-count&lt;/code&gt;, &lt;code&gt;time-limit&lt;/code&gt;, or custom checkpoint policy in job xml).&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;If the chunk size is too big, and the stop request arrives shortly after the current chunk starts, it may take a long time
+for the current chunk to complete before the batch container can safely stop the current step execution. On the other hand,
+a small chunk size results in more frequent checkpointing and quicker response to stop request at the expense of processing
+speed.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;properly-stop-an-individual-running-step&quot;&gt;Properly stop an individual running step&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The previous section describes ways to stop the entire job execution. You may be wondering if there is a way to stop
+an individual step only while allowing the rest of the job to continue. Since this is slightly deviates from the standard,
+you cannot use &lt;code&gt;JobOperator.stop(jobExecutionId)&lt;/code&gt; or &lt;code&gt;Batchlet.stop()&lt;/code&gt; to achieve that. Instead, I would consider this
+a special case of normal execution, which should be implemented by the batch application itself.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;stop-an-individual-running-batchlet-step&quot;&gt;Stop an individual running batchlet step&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Batchlet class can watch for some condition to determine if it should stop its processing. It can exit its &lt;code&gt;process()&lt;/code&gt;
+method with different exit status to signal different outcomes to subsequent steps. For example, &lt;code&gt;Batchlet1&lt;/code&gt; below
+polls the system property &lt;code&gt;job1.batchlet1.stop&lt;/code&gt;; once it&amp;#8217;s set to true, &lt;code&gt;process()&lt;/code&gt; method returns with exit status
+&lt;code&gt;BATCHLET1_STOPPED&lt;/code&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Similarly, the condition can be a marker file in the file system, a column value in a database table, a shared state
+in a single bean, etc.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Once the batchlet is stopped this way, the batch status of the step will be &lt;code&gt;COMPLETED&lt;/code&gt;, and its exit status will be
+&lt;code&gt;BATCHLET1_STOPPED&lt;/code&gt;. The job execution will continue to the next step configured in job xml.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight&quot;&gt;&lt;code class=&quot;language-java&quot; data-lang=&quot;java&quot;&gt;@Named
+public class Batchlet1 implements Batchlet {
+    @Override
+    public String process() throws Exception {
+        String exitStatus = &quot;BATCHLET1_COMPLETED&quot;;
+        while (true) {
+            if (shouldStop()) {
+                exitStatus = &quot;BATCHLET1_STOPPED&quot;;
+                break;
+            }
+            // perform batchlet task
+            // Thread.sleep(5000);
+        }
+        return exitStatus;
+    }
+
+    private boolean shouldStop() {
+        return Boolean.getBoolean(&quot;job1.batchlet1.stop&quot;);
+    }
+
+    @Override
+    public void stop() throws Exception {
+        // implement stop() method to respond to incoming request
+        // to stop this batchlet step and entire job execution
+    }
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;In WildFly CLI, you can set and unset a system property as a flag to batch application:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight&quot;&gt;&lt;code class=&quot;language-text&quot; data-lang=&quot;text&quot;&gt;# set system property in WildFly as a flag to stop the step execution
+#
+/system-property=job1.batchlet1.stop:add(value=true)
+{&quot;outcome&quot; =&amp;gt; &quot;success&quot;}
+
+# clean up afterwards and remove the system property
+#
+/system-property=job1.batchlet1.stop:remove()
+{&quot;outcome&quot; =&amp;gt; &quot;success&quot;}&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;stop-an-individual-running-chunk-step&quot;&gt;Stop an individual running chunk step&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Stopping an individual running chunk step is more complicated than a batchlet step. When implement this case as
+a special case of normal processing, a possible strategy is:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;A graceful stop should wait for the current chunk to complete, and then stop the next chunk. The batch application can poll certain
+condition in &lt;code&gt;javax.batch.api.chunk.listener.ChunkListener#beforeChunk&lt;/code&gt; method, and save the condition, e.g.,
+in &lt;code&gt;javax.batch.runtime.context.StepContext#setTransientUserData&lt;/code&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;javax.batch.api.chunk.ItemReader#readItem&lt;/code&gt; can check the condition from &lt;code&gt;javax.batch.runtime.context.StepContext#getTransientUserData&lt;/code&gt;,
+and if true, return null. This will cause the chunk step to complete normally as if there is no more data to read.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Once the chunk step is stopped this way, the batch status of the step will be &lt;code&gt;COMPLETED&lt;/code&gt;, and its exit status will be
+&lt;code&gt;COMPLETED&lt;/code&gt; unless reset by the batch application. The job execution will continue to the next step configured in job xml.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;summary&quot;&gt;Summary&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;In this post we went through ways to stop either a job execution or an individual step execution. It&amp;#8217;s possible to
+combine them, so the batch application can support graceful stop of both the entire job execution and any individual step.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;In most cases, I&amp;#8217;d recommend designing your batch application, adhering to the batch spec and leveraging the well-defined
+stop behavior. It makes your batch application and workflow easier to understand and maintain. Standard stop operation
+also supports restarting the previously stopped job execution from where it left off (e.g., stopped step or checkpoint).&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;When some batch applications really need to stop an individual step, the design choice and implementation should be
+well documented to convey the justification and implications. As this type of stop is disguised as a normal execution,
+it does not support restart. Care should be taken to avoid data loss and data corruption.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;</content>
+      
+
+      
+      
+      
+      
+      
+
+      <author>
+        <name>Cheng Fang</name>
+        
+        
+      </author>
+
+      
+        
+      
+
+      
+        <category term="wildfly" />
+      
+        <category term="jberet" />
+      
+        <category term="batch" />
+      
+
+      
+        <summary type="html">Batch jobs are long-running background processing tasks, and therefore it&amp;#8217;s common that user may need to pause or stop the execution. WildFly, which implements batch processing through its jberet component based on JSR 352 and Jakarta Batch Specification, offers a variety of ways to achieve that requirement. This post will demonstrate how to stop a running job execution, or individual step execution, and some design and implementation consideration.</summary>
+      
+
+      
+      
+    </entry>
+  
+    <entry>
+      <title type="html">Automatic Self-Signed Certificate Generation with Elytron</title>
+      <link href="https://wildfly-security.github.io/wildfly-elytron/blog/auto-self-signed-certificate-generation/" rel="alternate" type="text/html" title="Automatic Self-Signed Certificate Generation with Elytron" />
+      <published>2021-01-14T00:00:00+00:00</published>
+      <updated>2021-01-14T00:00:00+00:00</updated>
+      <id>https://wildfly-security.github.io/wildfly-elytron/blog/auto-self-signed-certificate-generation/</id>
+      
+      
+        <content type="html" xml:base="https://wildfly-security.github.io/wildfly-elytron/blog/auto-self-signed-certificate-generation/"></content>
+      
+
+      
+      
+      
+      
+      
+
+      <author>
+        <name>Farah Juma</name>
+        
+        
+      </author>
+
+      
+        
+      
+
+      
+        <category term="elytron" />
+      
+        <category term="wildfly" />
+      
+
+      
+
+      
+      
+    </entry>
+  
+    <entry>
+      <title type="html">WildFly 22 is released!</title>
+      <link href="https://wildfly.org//news/2021/01/13/WildFly22-Final-Released/" rel="alternate" type="text/html" title="WildFly 22 is released!" />
+      <published>2021-01-13T00:00:00+00:00</published>
+      <updated>2021-01-13T00:00:00+00:00</updated>
+      <id>https://wildfly.org//news/2021/01/13/WildFly22-Final-Released</id>
+      
+      
+        <content type="html" xml:base="https://wildfly.org//news/2021/01/13/WildFly22-Final-Released/">&lt;div id=&quot;preamble&quot;&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;I&amp;#8217;m pleased to announce that the WildFly 22 Final zip is now available &lt;a href=&quot;https://wildfly.org/downloads&quot;&gt;for download&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Let&amp;#8217;s have a look at what&amp;#8217;s new.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;new-features&quot;&gt;New Features&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;logging&quot;&gt;Logging&lt;/h3&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;In response to a great deal of user demand, WildFly has added &lt;a href=&quot;https://github.com/wildfly/wildfly-proposals/blob/master/logging/WFCORE-482-log4j2-support.adoc&quot;&gt;support for log4j2&lt;/a&gt;. Applications deployed in the server can use the log4j2 API which will delegate to the JBoss Log Manager.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;provisioning-and-managing-wildfly&quot;&gt;Provisioning and Managing WildFly&lt;/h3&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;It is now possible to use a &lt;a href=&quot;https://issues.redhat.com/browse/KEYCLOAK-14953&quot;&gt;Galleon feature pack provided by Keycloak&lt;/a&gt; to &lt;a href=&quot;https://github.com/wildfly/wildfly-proposals/blob/master/elytron/WFLY-13706-keycloak-feature-pack.adoc&quot;&gt;install the Keycloak client adapters for WildFly&lt;/a&gt; into your WildFly installation, instead of having to unzip content manually into your installation and update your config using the CLI. These Keycloak adapters allow you to secure deployments using OpenID Connect.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;A new &lt;a href=&quot;https://github.com/wildfly/wildfly-proposals/blob/master/clustering/web/WFLY-13150_Galleon_layer_distributable_web_local_cache.adoc&quot;&gt;web-passivation Galleon layer&lt;/a&gt; is available. Use it to provision the Distributable Web subsystem configured with a local web container cache.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;New &lt;a href=&quot;https://issues.redhat.com/browse/WFLY-14151&quot;&gt;base health&lt;/a&gt; and &lt;a href=&quot;https://issues.redhat.com/browse/WFLY-14108&quot;&gt;base metrics&lt;/a&gt; subsystems are available. These provide a foundation for updated versions of the corresponding 'microprofile-health-smallrye' and 'microprofile-metrics-smallrye' subsystems. They also allow users who don&amp;#8217;t need the custom deployment-specific health and metrics information provided by Eclipse MicroProfile Health and Metrics to still get general server health and metrics information via the management endpoint without needing to include the MicroProfile Health and Metrics libraries in their server installation.  This is discussed further in the Feature Pack Changes section below.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;If the &lt;code&gt;--read-only-server-config&lt;/code&gt; startup param is used, the server will now run &lt;a href=&quot;https://github.com/wildfly/wildfly-proposals/blob/master/ee/WFCORE-4135_Support_for_%20read_only_server_config_dir.adoc&quot;&gt;even if the configuration directory is read-only&lt;/a&gt;. This allows non-writable storage to be mounted as the configuration directory.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;The high-level CLI &lt;code&gt;command&lt;/code&gt; command has been enhanced to &lt;a href=&quot;https://github.com/wildfly/wildfly-proposals/blob/master/cli/WFCORE-5009-Evolve-generic-command.adoc&quot;&gt;allow creation of commands for existing resources&lt;/a&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;messaging&quot;&gt;Messaging&lt;/h3&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;The management API can now be used to &lt;a href=&quot;https://github.com/wildfly/wildfly-proposals/blob/master/messaging/WFLY-9213_Implement_the_Pause_method_for_a_Topic.adoc&quot;&gt;pause or resume a topic&lt;/a&gt; thus stopping all the subscribers from receiving new messages from a paused topic.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;In order to help mitigate the possibility of split brain problems ActiveMQ Artemis has the ability to ping a configurable list of hosts to check the health of the broker&amp;#8217;s network connection. This Artemis feature can now be &lt;a href=&quot;https://github.com/wildfly/wildfly-proposals/blob/master/messaging/WFLY-12825_Artemis_network_health_check_feature.adoc&quot;&gt;configured via the messaging-activemq subystem&amp;#8217;s management API&lt;/a&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;security&quot;&gt;Security&lt;/h3&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;WildFly now provides the ability to &lt;a href=&quot;https://github.com/wildfly/wildfly-proposals/blob/master/elytron/WFCORE-5095-automatic-self-signed-certificate-generation.adoc&quot;&gt;lazily generate a self-signed certificate on first use when using Elytron&lt;/a&gt;. This self-signed certificate should only be used for testing purposes. It should never be used in a production environment.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;It is now possible to &lt;a href=&quot;https://github.com/wildfly/wildfly-proposals/blob/master/elytron/WFCORE-4994-case-principal-transformer.adoc&quot;&gt;configure a 'case-principal-transformer' in the Elytron subsystem&lt;/a&gt; to convert a principal to upper or lower case. Previously, a custom transformer was required to adjust a principal’s username to upper/lower case. Elytron now provides a principal transformer for this use case.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;wildfly-preview&quot;&gt;WildFly Preview&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;As I &lt;a href=&quot;https://www.wildfly.org/news/2020/11/12/Jakarta-EE-9-with-WildFly-Preview/&quot;&gt;announced in November&lt;/a&gt; when we released WildFly 22 Alpha1, along with our traditional Jakarta EE 8 distribution we want to give our users a preview of what will be coming in WildFly as we move on to EE 9 and later. We call this distribution &quot;WildFly Preview&quot;. The WildFly 22.0.0.Final release includes an update to WildFly Preview. &lt;em&gt;Even though this is coming from a .Final tag of the WildFly codebase, WildFly Preview should always be regarded as a tech-preview/beta distribution.&lt;/em&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;EE 9 is primarily about implementing the necessary change in the Jakarta EE APIs from the javax.* package namespace to the jakarta.* namespace. This is a big change that is going to take a while to percolate through the EE ecosystem, e.g. for the many projects that compile against the EE APIs to provide versions that use jakarta.*. While this happens we want to continue to deliver new features and fixes to our community, so the primary WildFly distribution will continue to provide the EE 8 APIs.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;ee-9-via-bytecode-transformation-and-the-wildfly-preview-galleon-feature-pack&quot;&gt;EE 9 Via Bytecode Transformation and the 'wildfly-preview' Galleon Feature Pack&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The large majority of the libraries included in WildFly Preview that were compiled against EE APIs were based on the javax.* EE 8 APIs. This includes the libraries produced from WildFly&amp;#8217;s own code base and by WildFly Core. But the EE APIs libraries available in the WildFly Preview runtime all use the jakarta.* packages. How can this work?&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The solution we&amp;#8217;ve come up with for this is to provide a new 'wildfly-preview' Galleon feature pack, in addition to the standard 'wildfly' feature pack. (Recall that any WildFly server installation, including the ones that are zipped up and made available for download here, is produced by telling Galleon tooling to provision from a feature pack.) The 'wildfly-preview' feature pack differs from the standard 'wildfly' one in a number of ways, with the key ones relevant to EE 9 being:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;Where suitable EE 9 spec API jars were available from Eclipse, those were used instead of the EE 8 spec jars used in standard WildFly.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Where suitable 'native' EE 9 implementation libraries (i.e. ones compiled against jakarta.*) were available, those were used. This includes Weld, Hibernate Validator, Mojarra, Yasson, Jakarta EL and Jakarta JSON.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Any libraries that were using EE 8 APIs were detected and instructions were incorporated in the feature pack telling Galleon to do &lt;em&gt;byte code transformation of that library whenever it provisions a server using the feature pack&lt;/em&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The last item is the key point. When Galleon provisions a 'wildfly-preview' server by pulling jars down from maven, it knows that some artifacts were compiled against EE 8 javax.* packages. So it bytecode transforms those jars to alter references to EE 8 packages in the class file constant tables to change from javax.* to jakarta.*. The transformation goes beyond simple package renames; a number of other known differences between EE 8 and EE 9 are handled. Thanks to the &lt;a href=&quot;https://projects.eclipse.org/projects/technology.transformer&quot;&gt;Eclipse Transformer&lt;/a&gt; project for their work on the underlying transformation tool.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;You can use the Galleon CLI tool to provision a server from the wildfly-preview feature pack yourself:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;listingblock&quot;&gt;
+&lt;div class=&quot;content&quot;&gt;
+&lt;pre class=&quot;highlight&quot;&gt;&lt;code class=&quot;language-bash&quot; data-lang=&quot;bash&quot;&gt;galleon.sh install wildfly-preview:current --dir=my-wildfly-server&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Note the use of 'wildfly-preview' instead of 'wildfly'.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;As Galleon provisions the server it will log quite a bit of information about the transformation work it is doing.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Please note that the transformation adds a fair bit to the amount of time it takes to provision the server.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect2&quot;&gt;
+&lt;h3 id=&quot;wildfly-preview-support-for-ee-8-deployments&quot;&gt;WildFly Preview Support for EE 8 Deployments&lt;/h3&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The APIs that WildFly Preview exposes to deployments are the EE 9 APIs, so all the classes and interfaces are in the jakarta.* packages. But what if you want to run an existing EE 8 application on WildFly Preview? We expect that to be a very important use case in the long run. Eventually the jakarta.* APIs will be what&amp;#8217;s provided by the standard WildFly distribution, but many WildFly users will have existing applications that they&amp;#8217;ll want to continue to run unchanged. So we wanted to make sure from the very beginning that that works.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;What we&amp;#8217;ve done is we&amp;#8217;ve added to the server&amp;#8217;s handling of &lt;em&gt;managed&lt;/em&gt; deployments the same basic transformation that&amp;#8217;s applied to the server artifacts when provisioning. A managed deployment is one where a management client (the CLI, HAL console or the deployment scanner) presents deployment content to the server and the server makes a copy of it in its internal deployment content repository. The content that gets installed into the runtime is that internal copy.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;A WildFly Preview server, when it reads in deployment content to store in the content repository, will transform any EE 8 content into EE 9.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;In the long run I feel it&amp;#8217;s better for users if they either convert their application source to EE 9 APIs, or use build-time tooling that we and the rest of the Jakarta community will work to provide to do transformation at build time.  But some applications just can&amp;#8217;t be changed, so the server-side solution we&amp;#8217;re using can handle those cases.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;feature-pack-changes&quot;&gt;Feature Pack Changes&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The WildFly server is provisioned using five Galleon feature packs. The composition of these feature packs has changed somewhat in WildFly 22.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The five feature packs are:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;wildfly-core&lt;/code&gt;&amp;#8201;&amp;#8212;&amp;#8201;provides the functionality provided by the &lt;a href=&quot;https://github.com/wildfly/wildfly-core&quot;&gt;WildFly Core&lt;/a&gt; project.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;wildfly-servlet&lt;/code&gt;&amp;#8201;&amp;#8212;&amp;#8201;depends on wildfly-core and adds the functionality needed for the &quot;Servlet-Only Distribution&quot; you can find for each WildFly release on the &lt;a href=&quot;https://www.wildfly.org/downloads/&quot;&gt;download page&lt;/a&gt;.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;wildfly-ee&lt;/code&gt;&amp;#8201;&amp;#8212;&amp;#8201;depends on wildfly-servlet and adds the functionality needed for a full EE appserver, plus other long-standing appserver functionality like clustering support.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;wildfly&lt;/code&gt;&amp;#8201;&amp;#8212;&amp;#8201;depends on wildfly-ee and adds Eclipse MicroProfile functionality. This is the feature pack used to provision the standard WildFly distribution found on the &lt;a href=&quot;https://www.wildfly.org/downloads/&quot;&gt;download page&lt;/a&gt;, and is the feature pack that we expect most users who provision their own server or bootable jar to use.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;wildfly-preview&lt;/code&gt;&amp;#8201;&amp;#8212;&amp;#8201;depends on wildfly-core and adds all other functionality needed for the WildFly Preview distribution.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;In WildFly 22 we corrected a conceptual problem in WildFly 21 and earlier where the 'wildfly-ee' feature pack was including five MicroProfile specifications: Config, Health, Metrics, OpenTracing and Rest Client. We want the support for the faster moving, more-open-to-breaking-changes MicroProfile specs to only come from the top level 'wildfly' feature pack. So in WildFly 22 we moved that functionality out of 'wildfly-ee' and into 'wildfly'. People only using only 'wildfly-ee' to provision will no longer have access to those specifications.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We do want 'wildfly-ee' users to be able to continue to use the WildFly management interface to do server health and readiness checks and to get JVM and container metrics in Prometheus format. To support this we have added new &lt;a href=&quot;https://issues.redhat.com/browse/WFLY-14151&quot;&gt;base health&lt;/a&gt; and &lt;a href=&quot;https://issues.redhat.com/browse/WFLY-14108&quot;&gt;base metrics&lt;/a&gt; subsystems to wildfly-ee. These subsystems do not provide any sort of API to deployments; e.g. you can&amp;#8217;t use them to provide your own health checks or metrics in your application code. If you want that you should use the 'wildfly' feature pack and the MicroProfile Health and Metrics subsystems.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The MicroProfile Health and Metrics subsystems now require the presence in the config of the base health and base metrics subsystems. Users migrating from WildFly 21 or earlier should add these new extensions/subsystems to their configuration.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We anticipate further evolution in these feature packs in WildFly 23. In particular, it is likely the 'wildfly-ee' feature pack will no longer &lt;em&gt;depend on&lt;/em&gt; 'wildfly-servlet' or transitively on 'wildfly-core'. Instead it will directly provide the content currently provided by those feature packs.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;standards-support&quot;&gt;Standards Support&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;WildFly 22.0.0 is a Jakarta EE 8 compatible implementation, with both the Full Platform and the Web Profile. Evidence supporting our certification is available &lt;a href=&quot;https://github.com/wildfly/certifications/blob/EE8/WildFly_22.0.0.Final/jakarta-full-platform.adoc#tck-results&quot;&gt;for the Full Platform&lt;/a&gt; and &lt;a href=&quot;https://github.com/wildfly/certifications/blob/EE8/WildFly_22.0.0.Final/jakarta-web-profile.adoc#tck-results&quot;&gt;for the Web Profile&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;WildFly 22 is also a compatible implementation of Java EE 8.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;WildFly 22 is also a compliant implementation of the Eclipse MicroProfile 3.3 platform specification.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The WildFly Preview distribution released today is not yet a compatible implementation of Jakarta EE 9 or MicroProfile 3.3. We&amp;#8217;re continuing to make good progress toward being able to certify compatibility, but we&amp;#8217;re not there yet. The main area where users may hit meaningful issues related to EE compliance is in webservices if deployment descriptors using the EE 9 xml schemas are used. This can be worked around by using EE 8 schemas, which are functionally equivalent.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;jdk-support&quot;&gt;JDK Support&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Our recommendation is that you run WildFly on the most recent long-term support JDK release, i.e. on JDK 11 for WildFly 22. While we do do some testing of WildFly on JDK 12 and 13, we do considerably more testing of WildFly itself on the LTS JDKs, and we make no attempt to ensure the projects producing the various libraries we integrate are testing their libraries on anything other than JDK 8 or 11.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;WildFly 22 also is heavily tested and runs well on Java 8. We plan to continue to support Java 8 at least through WildFly 23, and probably beyond.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;While we recommend using an LTS JDK release, I do believe WildFly runs well on JDK 13. By run well, I mean the main WildFly testsuite runs with no more than a few failures in areas not expected to be commonly used. We want developers who are trying to evaluate what a newer JVM means for their applications to be able to look to WildFly as a useful development platform. We do see a couple of test failures with JDK 13 when using the deprecated Picketlink subsystem and WS Trust.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Work to allow WildFly to run on JDK 14 and 15 is ongoing. We&amp;#8217;re continuing our work to digest fully some of the package removals that came in JDK 14, particularly in the security area. The biggest barrier we face is the deprecated legacy security implementation based on Picketbox cannot support JDK 14. We intend to remove support for that security implementation after WildFly 23 and to only provide Elytron-based security. A lot of behind-the-scenes work to make that possible got accomplished during the WildFly 21 cycle.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Please note that WildFly runs on Java 11 and later in classpath mode.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;documentation&quot;&gt;Documentation&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The WildFly 22 documentation is available at the &lt;a href=&quot;https://docs.wildfly.org/22/&quot;&gt;docs.wildfly.org site&lt;/a&gt;. The WildFly 22 management API documentation is in the &lt;a href=&quot;https://docs.wildfly.org/22/wildscribe&quot;&gt;wildscribe section of the WildFly 22 docs&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;jira-release-notes&quot;&gt;Jira Release Notes&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The full list of issues resolved is available &lt;a href=&quot;https://issues.redhat.com/secure/ReleaseNote.jspa?projectId=12313721&amp;amp;version=12352781&quot;&gt;here&lt;/a&gt;. Issues resolved in the WildFly Core 14 releases included with WildFly 22 are available &lt;a href=&quot;https://issues.redhat.com/secure/ReleaseNote.jspa?projectId=12315422&amp;amp;version=12352616&quot;&gt;here&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;enjoy&quot;&gt;Enjoy!&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We hope you enjoy WildFly 22.  We&amp;#8217;d love to hear your feedback at the  &lt;a href=&quot;https://groups.google.com/forum/#!forum/wildfly&quot;&gt;WildFly forum&lt;/a&gt;. But most important, please stay safe and well!&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;</content>
+      
+
+      
+      
+      
+      
+      
+
+      <author>
+        <name>Brian Stansberry</name>
+        
+        
+      </author>
+
+      
+        
+      
+
+      
+        <category term="announcement" />
+      
+        <category term="release" />
+      
+        <category term="microprofile" />
+      
+
+      
+        <summary type="html">I&amp;#8217;m pleased to announce that the WildFly 22 Final zip is now available for download.</summary>
+      
+
+      
+      
+    </entry>
+  
+    <entry>
+      <title type="html">WildFly 22 Beta and 21.0.2.Final</title>
+      <link href="https://wildfly.org//news/2020/12/17/WildFly22-Beta-Released/" rel="alternate" type="text/html" title="WildFly 22 Beta and 21.0.2.Final" />
+      <published>2020-12-17T00:00:00+00:00</published>
+      <updated>2020-12-17T00:00:00+00:00</updated>
+      <id>https://wildfly.org//news/2020/12/17/WildFly22-Beta-Released</id>
+      
+      
+        <content type="html" xml:base="https://wildfly.org//news/2020/12/17/WildFly22-Beta-Released/">&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;year-end-treats&quot;&gt;Year End Treats&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;I&amp;#8217;m pleased to announce that two new WildFly releases are available for download at &lt;a href=&quot;https://wildfly.org/downloads&quot; class=&quot;bare&quot;&gt;https://wildfly.org/downloads&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;First you can get WildFly 22.0.0.Beta1 and have a look at what&amp;#8217;s coming soon in WildFly 22.  This also includes an update of WildFly Preview.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Release notes for that release are &lt;a href=&quot;https://issues.redhat.com/secure/ReleaseNote.jspa?projectId=12313721&amp;amp;version=12352283&quot;&gt;here&lt;/a&gt;, with issues fixed in the underlying WildFly Core betas listed &lt;a href=&quot;https://issues.redhat.com/secure/ConfigureReport.jspa?versions=12352615&amp;amp;versions=12352272&amp;amp;versions=12351519&amp;amp;versions=12346847&amp;amp;sections=all&amp;amp;style=none&amp;amp;selectedProjectId=12315422&amp;amp;reportKey=org.jboss.labs.jira.plugin.release-notes-report-plugin%3Areleasenotes&amp;amp;Next=Next&quot;&gt;here&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;For developers using our bootable jar feature, please have a look at the new dev-watch mode that Jean-Francois Denise describes in &lt;a href=&quot;https://www.wildfly.org/news/2020/12/15/bootable-jar-3.0.Beta-Released/&quot;&gt;his latest blog post&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We&amp;#8217;ve also done a micro update of WildFly 21, a new WildFly 21.0.2.Final release. This includes a fix for CVE-2020-27822, a medium impact CVE.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Release notes for that release are &lt;a href=&quot;https://issues.redhat.com/secure/ReleaseNote.jspa?projectId=12313721&amp;amp;version=12352600&quot;&gt;here&lt;/a&gt;. Thank you to Rafael Paz and Michel Erard for reporting the problems that led to these fixes!&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Thank you to everyone in the WildFly community for your support of WildFly in 2020. It&amp;#8217;s been a trying year but I&amp;#8217;m excited by and proud of the progress we&amp;#8217;ve made. I wish all of you and your families a happy and healthy rest of the year, and I&amp;#8217;m looking forward to a great 2021!&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Best regards,&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Brian&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;</content>
+      
+
+      
+      
+      
+      
+      
+
+      <author>
+        <name>Brian Stansberry</name>
+        
+        
+      </author>
+
+      
+        
+      
+
+      
+        <category term="announcement" />
+      
+        <category term="release" />
+      
+
+      
+        <summary type="html">Year End Treats</summary>
+      
+
+      
+      
+    </entry>
+  
+    <entry>
+      <title type="html">WildFly Bootable JAR 3.0.0.Beta1 is released!</title>
+      <link href="https://wildfly.org//news/2020/12/15/bootable-jar-3.0.Beta-Released/" rel="alternate" type="text/html" title="WildFly Bootable JAR 3.0.0.Beta1 is released!" />
+      <published>2020-12-15T00:00:00+00:00</published>
+      <updated>2020-12-15T00:00:00+00:00</updated>
+      <id>https://wildfly.org//news/2020/12/15/bootable-jar-3.0.Beta-Released</id>
+      
+      
+        <content type="html" xml:base="https://wildfly.org//news/2020/12/15/bootable-jar-3.0.Beta-Released/">&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The 3.0.0.Beta1 version of the &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/&quot;&gt;WildFly bootable JAR Maven plugin&lt;/a&gt; has been released.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;This  &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/releases/tag/3.0.0.Beta1&quot;&gt;release&lt;/a&gt;  is not yet Final,
+it is &quot;just a beta&quot;, but we think that it is of enough good quality to acquire feedback on it.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;For people who are not familiar with WildFly bootable JAR, I strongly recommend that you read
+this &lt;a href=&quot;https://www.wildfly.org/news/2020/10/19/bootable-jar-2.0-released/&quot;&gt;blog post&lt;/a&gt; that covers it in details.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;In addition to bug fixes, this release brings 2 new goals:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;help&lt;/code&gt;: to display the plugin goals and configuration elements descriptions.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;dev-watch&lt;/code&gt;: an evolution of the &lt;code&gt;dev&lt;/code&gt; goal that makes repackaging of your application no more required.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;dev-watch-goal&quot;&gt;Dev-watch goal&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The current &lt;code&gt;dev&lt;/code&gt; goal, although offering an efficient workflow to develop WildFly applications, requires an explicit repackaging of your application.
+This is currently done in two steps:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;mvn wildfly-jar:dev&lt;/code&gt;&lt;/p&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;that builds and starts the server in background. The deployment scanner monitors the &lt;code&gt;target/deployments&lt;/code&gt; directory for new deployed content.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;mvn package -Ddev&lt;/code&gt;&lt;/p&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;that builds your application then copy the deployment to the &lt;code&gt;target/deployments&lt;/code&gt; directory.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Update your src, re-call &lt;code&gt;mvn package -Ddev&lt;/code&gt;&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;When done call &lt;code&gt;mvn wildfly-jar:shutdown&lt;/code&gt;&lt;/p&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;that kills the running server (NB: requires the &lt;code&gt;management&lt;/code&gt; layer to be provisioned).&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;So each time a change is made to your application, &lt;code&gt;mvn package -Ddev&lt;/code&gt; must be called for the deployment to be re-deployed.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Furthermore, when the plugin configuration located in the pom.xml file is modified (e.g.: a new Galleon layer is added),
+when a CLI script is updated or when some extra content is added, the running server must be killed and &lt;code&gt;wildfly-jar:dev&lt;/code&gt; must then be re-called.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;This knowledge of when to re-build a bootable JAR, when to stop/re-start it, when to re-build your sources and when to re-deploy
+is now under the control of the &lt;code&gt;dev-watch&lt;/code&gt; goal.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;The new workflow introduced by the goal is:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;&lt;code&gt;mvn wildfly-jar:dev-watch&lt;/code&gt;&lt;/p&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;that builds your application (if needed), builds and starts the server, deploys your application and finally watches for file changes in your project.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Note that this call is blocking. The &lt;code&gt;dev-watch&lt;/code&gt; goal and the server write traces to the console.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Update your files.&lt;/p&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;changes are detected. The goal advertises in the console what is the action it is taking (re-build, re-deploy, …).&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;Refresh your browser (if needed) to access the re-deployed application.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;When done, send &lt;code&gt;Ctrl-C&lt;/code&gt; in the shell.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Integration in IDE is straightforward. As an example I have created a Maven action named 'dev-watch' that calls &lt;code&gt;wildfly-jar:dev-watch&lt;/code&gt;
+goal in &lt;a href=&quot;https://netbeans.org/&quot;&gt;NetBeans IDE&lt;/a&gt;. Once called, the goal traces are displayed in the IDE output windows. You can then forget
+about the execution and start modifying your files in the IDE and refresh your web browser to visualize changes.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;new-examples&quot;&gt;New Examples&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We have added some new examples:&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;ulist&quot;&gt;
+&lt;ul&gt;
+&lt;li&gt;
+&lt;p&gt;An &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/tree/3.0.0.Beta1/examples/jaxws&quot;&gt;example&lt;/a&gt; that shows how to use the &lt;a href=&quot;https://docs.wildfly.org/21/Bootable_Guide.html#gal.webservices&quot;&gt;webservices&lt;/a&gt; Galleon layer.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;An &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/tree/3.0.0.Beta1/examples/gradle-mdb-rar&quot;&gt;example&lt;/a&gt; that shows how to integrate the Maven plugin from Graddle.&lt;/p&gt;
+&lt;/li&gt;
+&lt;li&gt;
+&lt;p&gt;An &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/tree/3.0.0.Beta1/examples/mdb-rar&quot;&gt;example&lt;/a&gt; that shows how to deploy activemq rar file and
+use the &lt;a href=&quot;https://docs.wildfly.org/21/Bootable_Guide.html#gal.ejb&quot;&gt;ejb&lt;/a&gt; Galleon layer.&lt;/p&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;plugin-configuration-changes&quot;&gt;Plugin configuration changes&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We have fixed the &lt;code&gt;extraServerContent&lt;/code&gt; configuration element to be &lt;code&gt;extraServerContentDirs&lt;/code&gt;. That was required to align
+its name with the &lt;code&gt;extra-server-content-dirs&lt;/code&gt; alias. If you are already using  &lt;code&gt;extra-server-content-dirs&lt;/code&gt; (that is the advised way),
+then nothing change for you, if you are using &lt;code&gt;extraServerContent&lt;/code&gt;, you will have to update your pom file.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div class=&quot;sect1&quot;&gt;
+&lt;h2 id=&quot;to-conclude&quot;&gt;To conclude&lt;/h2&gt;
+&lt;div class=&quot;sectionbody&quot;&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;We hope that you are seeing the benefits of the new features that this release is bringing.
+We would really appreciate your &lt;a href=&quot;https://github.com/wildfly-extras/wildfly-jar-maven-plugin/issues&quot;&gt;feedback&lt;/a&gt; on the &lt;code&gt;dev-watch&lt;/code&gt; goal. We aim toward a smooth and efficient
+first class WildFly developer experience and we need you there!&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;Thank-you.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div class=&quot;paragraph&quot;&gt;
+&lt;p&gt;JF Denise&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;</content>
+      
+
+      
+      
+      
+      
+      
+
+      <author>
+        <name>Jean-François Denise</name>
+        
+        
+      </author>
+
+      
+        
+      
+
+      
+        <category term="wildfly" />
+      
+        <category term="galleon" />
+      
+        <category term="bootable" />
+      
+        <category term="jar" />
+      
+        <category term="bootable-jar" />
+      
+
+      
+        <summary type="html">The 3.0.0.Beta1 version of the WildFly bootable JAR Maven plugin has been released.</summary>
+      
+
+      
+      
+    </entry>
+  
+
+</feed>
+
